@@ -5,6 +5,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # kessai's deps.edn uses :local/root "../card" etc. (sibling checkouts,
+      # matching how the kotoba-lang repos are laid out in the west-managed
+      # monorepo) — check those siblings out here too so the classpath
+      # resolves the same way in CI.
+      - uses: actions/checkout@v4
+        with:
+          repository: kotoba-lang/card
+          path: ../card
+      - uses: actions/checkout@v4
+        with:
+          repository: kotoba-lang/banking
+          path: ../banking
+      - uses: actions/checkout@v4
+        with:
+          repository: kotoba-lang/swift
+          path: ../swift
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

@@ -13,6 +13,10 @@ jobs:
           git clone --depth 1 https://github.com/kotoba-lang/card ../card
           git clone --depth 1 https://github.com/kotoba-lang/banking ../banking
           git clone --depth 1 https://github.com/kotoba-lang/swift ../swift
+          # card/banking/swift each transitively depend on these via
+          # :local/root "../html" / "../css" too.
+          git clone --depth 1 https://github.com/kotoba-lang/html ../html
+          git clone --depth 1 https://github.com/kotoba-lang/css ../css
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

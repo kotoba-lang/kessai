@@ -6,12 +6,14 @@
 pure Clojure.** A [kotoba-lang](https://github.com/kotoba-lang) capability
 library that gives any ISIC-vertical actor (credit, securities, insurance,
 ...) a single `authorize`/`capture`/`refund`/`void` port instead of a bespoke
-payment integration per actor, built on the international standards two
+payment integration per actor, built on the international standards three
 sibling libraries already model: [`kotoba-lang/card`](https://github.com/kotoba-lang/card)
-(ISO 8583 card messages, ISO/IEC 7812 PAN) and
-[`kotoba-lang/banking`](https://github.com/kotoba-lang/banking) (ISO 13616
-IBAN, double-entry ledger). `kessai` adds ISO 20022 (`pain.001`
-CustomerCreditTransferInitiation) and BIC (ISO 9362) for the wire/SWIFT rail.
+(ISO 8583 card messages, ISO/IEC 7812 PAN), [`kotoba-lang/banking`](https://github.com/kotoba-lang/banking)
+(ISO 13616 IBAN, double-entry ledger), and [`kotoba-lang/swift`](https://github.com/kotoba-lang/swift)
+(BIC/ISO 9362, SWIFT MT, ISO 20022 envelope). `kessai` adds the ISO 20022
+`pain.001` (CustomerCreditTransferInitiation) credit-transfer record and its
+XML rendering for the wire/SWIFT rail — it does not reimplement BIC
+validation, which already exists in `kotoba-swift`.
 
 The library models **records, not the wire transport**. Real ISO 8583 uses a
 4-byte message indicator and BCD-packed fields; real ISO 20022 is XML over a
@@ -26,7 +28,7 @@ structurally without a codec or a network call. No network, no I/O.
 | Role | capability |
 | Payment port | rail-agnostic `authorize`/`capture`/`refund`/`void` protocol + mock adapter |
 | Card rail | ISO 8583 (MTI/data-element) bridge, via `kotoba-card` |
-| Wire rail | ISO 20022 `pain.001` credit-transfer + BIC (ISO 9362) validation, via `kotoba-banking` |
+| Wire rail | ISO 20022 `pain.001` credit-transfer, via `kotoba-banking` (IBAN) + `kotoba-swift` (BIC) |
 | Ledger tie-in | double-entry settlement postings, via `kotoba-banking` |
 | Tests | card + wire + core, all green |
 
@@ -64,8 +66,8 @@ each actor either reimplements this or reaches for a different ad hoc rail
 (a raw Stripe REST call, a bespoke crypto rail). `kotoba-kessai` is the
 pure-data layer that lets any actor's `PolicyGovernor` reason about payment
 state structurally, on top of the ISO 8583/ISO 20022/IBAN/BIC international
-standards `kotoba-card` and `kotoba-banking` already model — without
-reinventing card or wire message shapes.
+standards `kotoba-card`, `kotoba-banking` and `kotoba-swift` already model —
+without reinventing card or wire message shapes.
 
 ## Follow-ups
 

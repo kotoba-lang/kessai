@@ -1,7 +1,9 @@
 (ns kotoba.kessai.wire
-  "Wire/SWIFT rail for kessai — ISO 20022 pain.001 (CustomerCreditTransferInitiation)
-  and BIC (ISO 9362) validation, bridging kotoba.banking's IBAN (ISO 13616) to
-  kotoba.kessai's rail-agnostic PaymentRef.
+  "Wire/SWIFT rail for kessai — ISO 20022 pain.001 (CustomerCreditTransferInitiation),
+  bridging kotoba.swift's BIC (ISO 9362) validation and kotoba.banking's IBAN
+  (ISO 13616) to kotoba.kessai's rail-agnostic PaymentRef. Does not
+  reimplement BIC validation — that structural model already exists in
+  kotoba-lang/swift and is reused as-is.
 
   Models a single credit-transfer instruction only (one PmtInf / one
   CdtTrfTxInf) — batched multi-transaction pain.001 messages, the pacs.008
@@ -9,32 +11,8 @@
 
   No network, no I/O — a real wire adapter sends the XML this namespace
   renders to a bank/SWIFT gateway, but that transport is a follow-up."
-  (:require [clojure.string :as str]
-            [kotoba.banking :as banking]))
-
-;; ---------------------------------------------------------------------------
-;; BIC / SWIFT code (ISO 9362)
-;;   shape: institution(4 letters) + country(2 letters, ISO 3166-1 alpha-2) +
-;;          location(2 alnum) [+ branch(3 alnum)]  => 8 or 11 chars
-;; ---------------------------------------------------------------------------
-
-(def ^:private bic-pattern #"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$")
-
-(defn bic-valid?
-  "True when s is a well-formed BIC/SWIFT code (ISO 9362, 8 or 11 chars)."
-  [s]
-  (boolean (and (string? s) (re-matches bic-pattern (str/upper-case s)))))
-
-(defn parse-bic
-  "Decompose a BIC into {:bic/institution :bic/country :bic/location
-  :bic/branch}. Returns nil when malformed."
-  [s]
-  (when (bic-valid? s)
-    (let [u (str/upper-case s)]
-      {:bic/institution (subs u 0 4)
-       :bic/country     (subs u 4 6)
-       :bic/location    (subs u 6 8)
-       :bic/branch      (when (> (count u) 8) (subs u 8 11))})))
+  (:require [kotoba.banking :as banking]
+            [kotoba.swift :as swift]))
 
 ;; ---------------------------------------------------------------------------
 ;; pain.001.001.09 — CustomerCreditTransferInitiation (single transaction)
@@ -44,16 +22,17 @@
   "Construct a single-transaction ISO 20022 pain.001 credit-transfer record.
   `msg-id`/`end-to-end-id` are caller-supplied idempotency keys; amount is a
   plain positive number in major units (e.g. 12.50); currency is an ISO 4217
-  alpha-3 code. Throws ex-info with {:kessai/errors [...]} when any
-  IBAN/BIC/amount/currency fails validation."
+  alpha-3 code. IBANs are validated via kotoba.banking/iban-valid?, BICs via
+  kotoba.swift/bic-valid?. Throws ex-info with {:kessai/errors [...]} when
+  any IBAN/BIC/amount/currency fails validation."
   [{:keys [msg-id end-to-end-id debtor-iban debtor-bic
            creditor-iban creditor-bic creditor-name amount currency]
     :as   fields}]
   (let [errors (cond-> []
                  (not (banking/iban-valid? debtor-iban))         (conj :bad-debtor-iban)
                  (not (banking/iban-valid? creditor-iban))       (conj :bad-creditor-iban)
-                 (not (bic-valid? debtor-bic))                   (conj :bad-debtor-bic)
-                 (not (bic-valid? creditor-bic))                 (conj :bad-creditor-bic)
+                 (not (swift/bic-valid? debtor-bic))             (conj :bad-debtor-bic)
+                 (not (swift/bic-valid? creditor-bic))           (conj :bad-creditor-bic)
                  (not (and (number? amount) (pos? amount)))      (conj :bad-amount)
                  (not (re-matches #"[A-Z]{3}" (or currency "")))  (conj :bad-currency))]
     (when (seq errors)
@@ -61,9 +40,8 @@
     {:iso20022/msg-type      "pain.001.001.09"
      :iso20022/msg-id        msg-id
      :iso20022/end-to-end-id end-to-end-id
-     :iso20022/debtor        {:iban (str/upper-case debtor-iban) :bic (str/upper-case debtor-bic)}
-     :iso20022/creditor      {:iban (str/upper-case creditor-iban) :bic (str/upper-case creditor-bic)
-                               :name creditor-name}
+     :iso20022/debtor        {:iban debtor-iban :bic debtor-bic}
+     :iso20022/creditor      {:iban creditor-iban :bic creditor-bic :name creditor-name}
      :iso20022/amount        amount
      :iso20022/currency      currency}))
 

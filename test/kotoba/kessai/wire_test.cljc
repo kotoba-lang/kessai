@@ -3,29 +3,13 @@
             [kotoba.kessai.wire :as wire]))
 
 ;; Textbook example IBANs (mod-97 verified) — GB/DE — with real-format
-;; (not necessarily real-institution) BICs of the matching country.
+;; (not necessarily real-institution) BICs of the matching country. BIC
+;; shape/checksum-free validation itself is kotoba-lang/swift's job
+;; (kotoba.swift/bic-valid?) — not re-tested here, only its integration.
 (def debtor-iban "GB82WEST12345698765432")
 (def debtor-bic "NWBKGB2L")
 (def creditor-iban "DE89370400440532013000")
 (def creditor-bic "DEUTDEFF")
-
-(deftest bic-valid-test
-  (testing "accepts 8-char BIC"
-    (is (wire/bic-valid? debtor-bic)))
-  (testing "accepts 11-char BIC with branch code"
-    (is (wire/bic-valid? "DEUTDEFF500")))
-  (testing "rejects malformed input"
-    (is (not (wire/bic-valid? "not-a-bic"))))
-  (testing "rejects wrong length"
-    (is (not (wire/bic-valid? "DEUT")))))
-
-(deftest parse-bic-test
-  (let [b (wire/parse-bic creditor-bic)]
-    (is (= "DEUT" (:bic/institution b)))
-    (is (= "DE" (:bic/country b)))
-    (is (= "FF" (:bic/location b)))
-    (is (nil? (:bic/branch b))))
-  (is (nil? (wire/parse-bic "bad"))))
 
 (defn- valid-fields []
   {:msg-id "MSG1" :end-to-end-id "E2E1"

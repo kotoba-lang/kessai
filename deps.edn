@@ -1,6 +1,7 @@
 {:paths ["src"]
  :deps {io.github.kotoba-lang/card    {:local/root "../card"}
-        io.github.kotoba-lang/banking {:local/root "../banking"}}
+        io.github.kotoba-lang/banking {:local/root "../banking"}
+        io.github.kotoba-lang/swift   {:local/root "../swift"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

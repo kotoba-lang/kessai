@@ -67,7 +67,10 @@
     PaymentRef -- :kessai/refunded-amount accumulates across calls, and
     :kessai/status becomes :refunded once the accumulated total reaches the
     PaymentRef's :kessai/amount, :partially-refunded otherwise. A no-op on
-    any other status (:authorized/:declined/:failed/:voided/:refunded).")
+    any other status (:authorized/:declined/:failed/:voided/:refunded).
+    `amount` is clamped to whatever remains refundable -- :kessai/refunded-
+    amount can never exceed :kessai/amount, even if a caller requests more
+    than the remaining balance (retry, duplicate request, operator error).")
   (void [this payment-ref]
     "Cancel an :authorized-but-not-yet-captured PaymentRef. Returns an updated
     PaymentRef with :kessai/status :voided."))
@@ -93,10 +96,16 @@
     ;; refund past the first silently no-op'd (status had already moved off
     ;; :captured), with no error to signal it. :kessai/refunded-amount
     ;; accumulates across calls so a chain of partial refunds correctly
-    ;; reaches :refunded once the total covers :kessai/amount.
+    ;; reaches :refunded once the total covers :kessai/amount -- but the
+    ;; per-call `amount` is clamped to whatever remains refundable first, so
+    ;; an over-refund (retry, duplicate request, operator error) can never
+    ;; push :kessai/refunded-amount past :kessai/amount.
     (if (or (captured? payment-ref)
             (= :partially-refunded (:kessai/status payment-ref)))
-      (let [total (+ (:kessai/refunded-amount payment-ref 0) amount)]
+      (let [already   (:kessai/refunded-amount payment-ref 0)
+            remaining (- (:kessai/amount payment-ref) already)
+            applied   (max 0 (min amount remaining))
+            total     (+ already applied)]
         (assoc payment-ref
                :kessai/status (if (>= total (:kessai/amount payment-ref))
                                 :refunded

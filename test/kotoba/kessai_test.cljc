@@ -44,6 +44,23 @@
               (let [p1 (kessai/refund port captured 999)
                     p2 (kessai/refund port p1 1000)]
                 (is (= :refunded (:kessai/status p2)))
+                (is (= 1999 (:kessai/refunded-amount p2)))))
+            (testing "a refund that would exceed the captured amount is
+                      clamped, not silently accepted (regression: refund
+                      accumulated total unclamped, so 1000 + 1500 against a
+                      1999 captured amount recorded a refunded-amount of
+                      2500, exceeding the original payment)"
+              (let [p1 (kessai/refund port captured 1000)
+                    p2 (kessai/refund port p1 1500)]
+                (is (= 1000 (:kessai/refunded-amount p1)))
+                (is (= :refunded (:kessai/status p2)))
+                (is (= 1999 (:kessai/refunded-amount p2))
+                    "refunded-amount must never exceed the captured amount")))
+            (testing "a further refund attempt after already :refunded stays clamped"
+              (let [p1 (kessai/refund port captured 1999)
+                    p2 (kessai/refund port p1 500)]
+                (is (= :refunded (:kessai/status p1)))
+                (is (= :refunded (:kessai/status p2)))
                 (is (= 1999 (:kessai/refunded-amount p2)))))))
         (testing "void"
           (is (kessai/voided? (kessai/void port pref))))))

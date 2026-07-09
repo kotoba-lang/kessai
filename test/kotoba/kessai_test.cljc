@@ -25,7 +25,26 @@
             (testing "full refund"
               (is (= :refunded (:kessai/status (kessai/refund port captured 1999)))))
             (testing "partial refund"
-              (is (= :partially-refunded (:kessai/status (kessai/refund port captured 500)))))))
+              (is (= :partially-refunded (:kessai/status (kessai/refund port captured 500)))))
+            (testing "a second refund on an already-partially-refunded ref
+                      accumulates instead of silently no-op'ing (regression:
+                      refund's status guard only accepted :captured, so any
+                      refund past the first returned the ref UNCHANGED with
+                      no error -- indistinguishable from success)"
+              (let [p1 (kessai/refund port captured 500)
+                    p2 (kessai/refund port p1 500)]
+                (is (= :partially-refunded (:kessai/status p1)))
+                (is (= 500 (:kessai/refunded-amount p1)))
+                (is (not= p1 p2) "the second refund call must actually change state")
+                (is (= :partially-refunded (:kessai/status p2)))
+                (is (= 1000 (:kessai/refunded-amount p2))
+                    "refunded-amount accumulates across calls, not overwritten")))
+            (testing "a chain of refunds that exactly exhausts the captured
+                      amount transitions to :refunded"
+              (let [p1 (kessai/refund port captured 999)
+                    p2 (kessai/refund port p1 1000)]
+                (is (= :refunded (:kessai/status p2)))
+                (is (= 1999 (:kessai/refunded-amount p2)))))))
         (testing "void"
           (is (kessai/voided? (kessai/void port pref))))))
     (testing "capture on a non-authorized ref is a no-op"

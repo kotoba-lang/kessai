@@ -62,9 +62,12 @@
     "Settle a previously :authorized PaymentRef. Returns an updated PaymentRef
     with :kessai/status :captured (unchanged if not currently :authorized).")
   (refund [this payment-ref amount]
-    "Return `amount` (<= the PaymentRef's :kessai/amount) to the payer.
-    Returns an updated PaymentRef with :kessai/status :refunded when amount
-    equals the captured amount, :partially-refunded otherwise.")
+    "Return `amount` (this call's increment, not a running total) to the
+    payer. Callable repeatedly on a :captured OR already-:partially-refunded
+    PaymentRef -- :kessai/refunded-amount accumulates across calls, and
+    :kessai/status becomes :refunded once the accumulated total reaches the
+    PaymentRef's :kessai/amount, :partially-refunded otherwise. A no-op on
+    any other status (:authorized/:declined/:failed/:voided/:refunded).")
   (void [this payment-ref]
     "Cancel an :authorized-but-not-yet-captured PaymentRef. Returns an updated
     PaymentRef with :kessai/status :voided."))
@@ -85,12 +88,20 @@
       (assoc payment-ref :kessai/status :captured)
       payment-ref))
   (refund [_ payment-ref amount]
-    (if (captured? payment-ref)
-      (assoc payment-ref
-             :kessai/status (if (= amount (:kessai/amount payment-ref))
-                              :refunded
-                              :partially-refunded)
-             :kessai/refunded-amount amount)
+    ;; :captured for the FIRST refund, :partially-refunded for any refund
+    ;; after that -- a bare `(captured? payment-ref)` guard meant every
+    ;; refund past the first silently no-op'd (status had already moved off
+    ;; :captured), with no error to signal it. :kessai/refunded-amount
+    ;; accumulates across calls so a chain of partial refunds correctly
+    ;; reaches :refunded once the total covers :kessai/amount.
+    (if (or (captured? payment-ref)
+            (= :partially-refunded (:kessai/status payment-ref)))
+      (let [total (+ (:kessai/refunded-amount payment-ref 0) amount)]
+        (assoc payment-ref
+               :kessai/status (if (>= total (:kessai/amount payment-ref))
+                                :refunded
+                                :partially-refunded)
+               :kessai/refunded-amount total))
       payment-ref))
   (void [_ payment-ref]
     (if (authorized? payment-ref)

@@ -43,6 +43,27 @@
       (is (re-find #"<EndToEndId>E2E1</EndToEndId>" xml))
       (is (re-find #"Ccy=\"EUR\"" xml)))))
 
+(deftest pain001-xml-escapes-free-text-fields
+  ;; msg-id, end-to-end-id, and creditor-name are caller-supplied free text
+  ;; with no character restrictions -- a bare &, <, or > must not break XML
+  ;; well-formedness or let a crafted value inject/override sibling elements.
+  (let [xml (wire/->pain001-xml
+             (wire/credit-transfer
+              (assoc (valid-fields) :creditor-name "Acme & Sons <Ltd>")))]
+    (testing "the & and < > are escaped, not spliced raw"
+      (is (re-find #"<Nm>Acme &amp; Sons &lt;Ltd&gt;</Nm>" xml))
+      (is (not (re-find #"&(?!amp;|lt;|gt;|quot;|#)" xml))
+          "no bare, unescaped & anywhere in the document")))
+  (testing "an element-injection attempt via creditor-name is neutralized"
+    (let [xml (wire/->pain001-xml
+               (wire/credit-transfer
+                (assoc (valid-fields)
+                       :creditor-name "</Nm></Cdtr><CdtrAcct><Id><IBAN>ATTACKER</IBAN></Id></CdtrAcct>")))]
+      (is (not (re-find #"<IBAN>ATTACKER</IBAN>" xml))
+          "the injected IBAN element never becomes real XML markup")
+      (is (re-find (re-pattern (str "<IBAN>" creditor-iban "</IBAN>")) xml)
+          "the legitimate creditor IBAN element is still intact"))))
+
 (deftest wire-request-test
   (let [req (wire/wire-request (wire/credit-transfer (valid-fields)))]
     (is (= :wire (:kessai/rail req)))

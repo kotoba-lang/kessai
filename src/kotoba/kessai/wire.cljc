@@ -11,7 +11,8 @@
 
   No network, no I/O — a real wire adapter sends the XML this namespace
   renders to a bank/SWIFT gateway, but that transport is a follow-up."
-  (:require [kotoba.banking :as banking]
+  (:require [clojure.string :as str]
+            [kotoba.banking :as banking]
             [kotoba.swift :as swift]))
 
 ;; ---------------------------------------------------------------------------
@@ -45,38 +46,56 @@
      :iso20022/amount        amount
      :iso20022/currency      currency}))
 
+(defn- xml-escape
+  "Escape text for placement inside XML element content or a double-quoted
+  attribute value. IBAN/BIC/currency are structurally validated elsewhere
+  and never reach here unescaped, but msg-id/end-to-end-id/creditor-name are
+  caller-supplied free text with no character restrictions -- splicing them
+  in raw lets a bare `&`, `<`, or `>` break XML well-formedness, or worse,
+  let a crafted value (e.g. \"</Nm></Cdtr><CdtrAcct>...\") inject/override
+  sibling elements."
+  [s]
+  (-> (str s)
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")
+      (str/replace "\"" "&quot;")))
+
 (defn ->pain001-xml
   "Minimal, structurally-valid pain.001.001.09 XML for a single credit
   transfer (one GrpHdr + one PmtInf + one CdtTrfTxInf) — enough to
   interoperate with bank/SWIFT gateways that accept single-transaction
   batches. Not a full XSD implementation; see README."
   [{:iso20022/keys [msg-id end-to-end-id debtor creditor amount currency]}]
-  (str
-   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-   "<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.09\">"
-   "<CstmrCdtTrfInitn>"
-   "<GrpHdr>"
-   "<MsgId>" msg-id "</MsgId>"
-   "<CreDtTm/>"
-   "<NbOfTxs>1</NbOfTxs>"
-   "<CtrlSum>" amount "</CtrlSum>"
-   "</GrpHdr>"
-   "<PmtInf>"
-   "<PmtInfId>" msg-id "</PmtInfId>"
-   "<PmtMtd>TRF</PmtMtd>"
-   "<Dbtr><Nm/></Dbtr>"
-   "<DbtrAcct><Id><IBAN>" (:iban debtor) "</IBAN></Id></DbtrAcct>"
-   "<DbtrAgt><FinInstnId><BICFI>" (:bic debtor) "</BICFI></FinInstnId></DbtrAgt>"
-   "<CdtTrfTxInf>"
-   "<PmtId><EndToEndId>" end-to-end-id "</EndToEndId></PmtId>"
-   "<Amt><InstdAmt Ccy=\"" currency "\">" amount "</InstdAmt></Amt>"
-   "<CdtrAgt><FinInstnId><BICFI>" (:bic creditor) "</BICFI></FinInstnId></CdtrAgt>"
-   "<Cdtr><Nm>" (:name creditor) "</Nm></Cdtr>"
-   "<CdtrAcct><Id><IBAN>" (:iban creditor) "</IBAN></Id></CdtrAcct>"
-   "</CdtTrfTxInf>"
-   "</PmtInf>"
-   "</CstmrCdtTrfInitn>"
-   "</Document>"))
+  (let [msg-id        (xml-escape msg-id)
+        end-to-end-id (xml-escape end-to-end-id)
+        creditor-name (xml-escape (:name creditor))]
+    (str
+     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+     "<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.09\">"
+     "<CstmrCdtTrfInitn>"
+     "<GrpHdr>"
+     "<MsgId>" msg-id "</MsgId>"
+     "<CreDtTm/>"
+     "<NbOfTxs>1</NbOfTxs>"
+     "<CtrlSum>" amount "</CtrlSum>"
+     "</GrpHdr>"
+     "<PmtInf>"
+     "<PmtInfId>" msg-id "</PmtInfId>"
+     "<PmtMtd>TRF</PmtMtd>"
+     "<Dbtr><Nm/></Dbtr>"
+     "<DbtrAcct><Id><IBAN>" (:iban debtor) "</IBAN></Id></DbtrAcct>"
+     "<DbtrAgt><FinInstnId><BICFI>" (:bic debtor) "</BICFI></FinInstnId></DbtrAgt>"
+     "<CdtTrfTxInf>"
+     "<PmtId><EndToEndId>" end-to-end-id "</EndToEndId></PmtId>"
+     "<Amt><InstdAmt Ccy=\"" currency "\">" amount "</InstdAmt></Amt>"
+     "<CdtrAgt><FinInstnId><BICFI>" (:bic creditor) "</BICFI></FinInstnId></CdtrAgt>"
+     "<Cdtr><Nm>" creditor-name "</Nm></Cdtr>"
+     "<CdtrAcct><Id><IBAN>" (:iban creditor) "</IBAN></Id></CdtrAcct>"
+     "</CdtTrfTxInf>"
+     "</PmtInf>"
+     "</CstmrCdtTrfInitn>"
+     "</Document>")))
 
 ;; ---------------------------------------------------------------------------
 ;; kessai bridge

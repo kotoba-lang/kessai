@@ -16,10 +16,12 @@ XML rendering for the wire/SWIFT rail — it does not reimplement BIC
 validation, which already exists in `kotoba-swift`.
 
 The library models **records, not the wire transport**. Real ISO 8583 uses a
-4-byte message indicator and BCD-packed fields; real ISO 20022 is XML over a
-bank/SWIFT gateway connection — here everything is EDN (plus a minimal XML
-renderer for `pain.001`) so a governor or test harness can reason
-structurally without a codec or a network call. No network, no I/O.
+4-byte message indicator and BCD-packed fields — the card rail is EDN so a
+governor or test harness can reason structurally without a codec. The wire
+rail's `pain.001` XML is genuinely emitted (via `kotoba-swift`'s
+`kotoba.swift.iso20022`, itself built on `kotoba-lang/xml`'s Hiccup->XML
+emitter) rather than a hand-rolled string renderer — see ADR-2607142340. No
+network, no I/O either way.
 
 ## Maturity
 
@@ -49,9 +51,13 @@ structurally without a codec or a network call. No network, no I/O.
 (def ct (wire/credit-transfer
           {:msg-id "MSG1" :end-to-end-id "E2E1"
            :debtor-iban "GB82WEST12345698765432" :debtor-bic "NWBKGB2L"
+           :debtor-name "Acme UK Ltd"
            :creditor-iban "DE89370400440532013000" :creditor-bic "DEUTDEFF"
-           :creditor-name "Acme GmbH" :amount 100.5 :currency "EUR"}))
-(wire/->pain001-xml ct)                             ; => "<?xml ...><Document ...>"
+           :creditor-name "Acme GmbH" :amount 100.5 :currency "EUR"
+           :creation-date-time "2026-07-15T09:00:00Z"
+           :payment-info-id "PMTINF1"
+           :requested-execution-date "2026-07-15"}))
+(wire/->pain001-xml ct)                             ; => "<?xml ...><Document ...>" (real emitted XML)
 (kessai/authorize port (wire/wire-request ct))      ; => {:kessai/rail :wire :kessai/status :authorized ...}
 
 ;; Ledger tie-in (double-entry via kotoba-banking)

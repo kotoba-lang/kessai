@@ -5,97 +5,150 @@
   reimplement BIC validation — that structural model already exists in
   kotoba-lang/swift and is reused as-is.
 
+  XML is rendered via kotoba.swift.iso20022/pain001-doc + xml->str
+  (ADR-2607142340) -- genuinely emitted, schema-verified-shape XML, not the
+  hand-rolled string-splicing this namespace used before that library
+  existed (see ADR-2607142340 Consequences, and its own follow-up note
+  about migrating this namespace).
+
   Models a single credit-transfer instruction only (one PmtInf / one
   CdtTrfTxInf) — batched multi-transaction pain.001 messages, the pacs.008
   interbank leg, and camt.053 statements are a follow-up (see README).
 
   No network, no I/O — a real wire adapter sends the XML this namespace
   renders to a bank/SWIFT gateway, but that transport is a follow-up."
-  (:require [clojure.string :as str]
-            [kotoba.banking :as banking]
-            [kotoba.swift :as swift]))
+  (:require [kotoba.banking :as banking]
+            [kotoba.swift :as swift]
+            [kotoba.swift.iso20022 :as iso20022]))
 
 ;; ---------------------------------------------------------------------------
 ;; pain.001.001.09 — CustomerCreditTransferInitiation (single transaction)
 ;; ---------------------------------------------------------------------------
+
+(defn- major->minor
+  "Convert a positive major-unit amount (e.g. 100.5) to integer minor units
+  (e.g. 10050). Assumes a 2-decimal currency -- the same assumption this
+  namespace's `amount` field has always carried (its own tests and every
+  known caller use 2-decimal codes like EUR/GBP). A currency needing 0 or 3
+  decimal places (e.g. JPY, BHD) is out of scope here, the same class of
+  honest, documented scope limit kotoba.swift.iso20022's own README states
+  for its message-definition coverage -- not silently mishandled, just not
+  attempted."
+  [amount]
+  #?(:clj  (Math/round (double (* amount 100)))
+     :cljs (js/Math.round (* amount 100))))
+
+(defn- representable-in-2-decimals?
+  "True when amount, multiplied by 100, is within float-precision epsilon of
+  a whole number -- i.e. major->minor would not silently drop a fraction of
+  a cent (e.g. 12.567 -> 1257, quietly discarding the 0.007). The OLD hand-
+  rolled XML builder never converted units at all (it spliced the raw major-
+  unit number as text), so it had no such precision-loss failure mode; this
+  check exists specifically because migrating to integer-minor-unit amounts
+  (as kotoba.swift.iso20022/pain001-doc requires) introduces one, and a
+  financial amount silently losing sub-cent precision must fail loudly, not
+  round away money. Reuses major->minor's own rounding (not a second,
+  platform-specific implementation) so the two can never disagree."
+  [amount]
+  (< (let [d (- (* amount 100) (major->minor amount))] (if (neg? d) (- d) d))
+     1e-6))
 
 (defn credit-transfer
   "Construct a single-transaction ISO 20022 pain.001 credit-transfer record.
   `msg-id`/`end-to-end-id` are caller-supplied idempotency keys; amount is a
   plain positive number in major units (e.g. 12.50); currency is an ISO 4217
   alpha-3 code. IBANs are validated via kotoba.banking/iban-valid?, BICs via
-  kotoba.swift/bic-valid?. Throws ex-info with {:kessai/errors [...]} when
-  any IBAN/BIC/amount/currency fails validation."
-  [{:keys [msg-id end-to-end-id debtor-iban debtor-bic
-           creditor-iban creditor-bic creditor-name amount currency]
+  kotoba.swift/bic-valid?.
+
+  `debtor-name`, `creation-date-time` (ISO 8601 date-time), `payment-info-id`,
+  and `requested-execution-date` (ISO 8601 date) are REQUIRED here -- they
+  were silently omitted/left empty by this namespace's former hand-rolled
+  XML builder (`<CreDtTm/>` and `<Dbtr><Nm/></Dbtr>` rendered empty), which
+  kotoba.swift.iso20022/pain001-doc correctly refuses to do (returns nil for
+  a missing required field rather than emitting an incomplete document).
+  `charge-bearer` defaults to \"SLEV\" (same default as pain001-doc);
+  `instruction-id`/`uetr`/`remittance-information` are optional pass-through.
+
+  `amount` must be representable exactly in 2 decimal places (e.g. 12.567
+  is rejected as :amount-not-representable-in-2-decimals) -- ->pain001-xml
+  converts it to integer minor units, and a financial amount silently
+  losing sub-cent precision must fail loudly, not round away money.
+
+  Throws ex-info with {:kessai/errors [...]} when any field fails
+  validation."
+  [{:keys [msg-id end-to-end-id debtor-iban debtor-bic debtor-name
+           creditor-iban creditor-bic creditor-name amount currency
+           creation-date-time payment-info-id requested-execution-date
+           charge-bearer instruction-id uetr remittance-information]
+    :or   {charge-bearer "SLEV"}
     :as   fields}]
   (let [errors (cond-> []
-                 (not (banking/iban-valid? debtor-iban))         (conj :bad-debtor-iban)
-                 (not (banking/iban-valid? creditor-iban))       (conj :bad-creditor-iban)
-                 (not (swift/bic-valid? debtor-bic))             (conj :bad-debtor-bic)
-                 (not (swift/bic-valid? creditor-bic))           (conj :bad-creditor-bic)
-                 (not (and (number? amount) (pos? amount)))      (conj :bad-amount)
-                 (not (re-matches #"[A-Z]{3}" (or currency "")))  (conj :bad-currency))]
+                 (not (banking/iban-valid? debtor-iban))                    (conj :bad-debtor-iban)
+                 (not (banking/iban-valid? creditor-iban))                  (conj :bad-creditor-iban)
+                 (not (swift/bic-valid? debtor-bic))                       (conj :bad-debtor-bic)
+                 (not (swift/bic-valid? creditor-bic))                     (conj :bad-creditor-bic)
+                 (not (and (number? amount) (pos? amount)))                (conj :bad-amount)
+                 (and (number? amount) (pos? amount)
+                      (not (representable-in-2-decimals? amount)))          (conj :amount-not-representable-in-2-decimals)
+                 (not (re-matches #"[A-Z]{3}" (or currency "")))            (conj :bad-currency)
+                 (not (seq debtor-name))                                    (conj :bad-debtor-name)
+                 (not (iso20022/iso-datetime-valid? creation-date-time))    (conj :bad-creation-date-time)
+                 (not (seq payment-info-id))                                (conj :bad-payment-info-id)
+                 (not (iso20022/iso-date-valid? requested-execution-date))  (conj :bad-requested-execution-date)
+                 (not (contains? iso20022/chrg-br-codes charge-bearer))     (conj :bad-charge-bearer))]
     (when (seq errors)
       (throw (ex-info "invalid credit transfer" {:kessai/errors errors :kessai/fields fields})))
-    {:iso20022/msg-type      "pain.001.001.09"
-     :iso20022/msg-id        msg-id
-     :iso20022/end-to-end-id end-to-end-id
-     :iso20022/debtor        {:iban debtor-iban :bic debtor-bic}
-     :iso20022/creditor      {:iban creditor-iban :bic creditor-bic :name creditor-name}
-     :iso20022/amount        amount
-     :iso20022/currency      currency}))
-
-(defn- xml-escape
-  "Escape text for placement inside XML element content or a double-quoted
-  attribute value. IBAN/BIC/currency are structurally validated elsewhere
-  and never reach here unescaped, but msg-id/end-to-end-id/creditor-name are
-  caller-supplied free text with no character restrictions -- splicing them
-  in raw lets a bare `&`, `<`, or `>` break XML well-formedness, or worse,
-  let a crafted value (e.g. \"</Nm></Cdtr><CdtrAcct>...\") inject/override
-  sibling elements."
-  [s]
-  (-> (str s)
-      (str/replace "&" "&amp;")
-      (str/replace "<" "&lt;")
-      (str/replace ">" "&gt;")
-      (str/replace "\"" "&quot;")))
+    {:iso20022/msg-type                 "pain.001.001.09"
+     :iso20022/msg-id                   msg-id
+     :iso20022/end-to-end-id            end-to-end-id
+     :iso20022/instruction-id           instruction-id
+     :iso20022/uetr                     uetr
+     :iso20022/debtor                   {:iban debtor-iban :bic debtor-bic :name debtor-name}
+     :iso20022/creditor                 {:iban creditor-iban :bic creditor-bic :name creditor-name}
+     :iso20022/amount                   amount
+     :iso20022/currency                 currency
+     :iso20022/creation-date-time       creation-date-time
+     :iso20022/payment-info-id          payment-info-id
+     :iso20022/requested-execution-date requested-execution-date
+     :iso20022/charge-bearer            charge-bearer
+     :iso20022/remittance-information   remittance-information}))
 
 (defn ->pain001-xml
-  "Minimal, structurally-valid pain.001.001.09 XML for a single credit
-  transfer (one GrpHdr + one PmtInf + one CdtTrfTxInf) — enough to
-  interoperate with bank/SWIFT gateways that accept single-transaction
-  batches. Not a full XSD implementation; see README."
-  [{:iso20022/keys [msg-id end-to-end-id debtor creditor amount currency]}]
-  (let [msg-id        (xml-escape msg-id)
-        end-to-end-id (xml-escape end-to-end-id)
-        creditor-name (xml-escape (:name creditor))]
-    (str
-     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-     "<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.09\">"
-     "<CstmrCdtTrfInitn>"
-     "<GrpHdr>"
-     "<MsgId>" msg-id "</MsgId>"
-     "<CreDtTm/>"
-     "<NbOfTxs>1</NbOfTxs>"
-     "<CtrlSum>" amount "</CtrlSum>"
-     "</GrpHdr>"
-     "<PmtInf>"
-     "<PmtInfId>" msg-id "</PmtInfId>"
-     "<PmtMtd>TRF</PmtMtd>"
-     "<Dbtr><Nm/></Dbtr>"
-     "<DbtrAcct><Id><IBAN>" (:iban debtor) "</IBAN></Id></DbtrAcct>"
-     "<DbtrAgt><FinInstnId><BICFI>" (:bic debtor) "</BICFI></FinInstnId></DbtrAgt>"
-     "<CdtTrfTxInf>"
-     "<PmtId><EndToEndId>" end-to-end-id "</EndToEndId></PmtId>"
-     "<Amt><InstdAmt Ccy=\"" currency "\">" amount "</InstdAmt></Amt>"
-     "<CdtrAgt><FinInstnId><BICFI>" (:bic creditor) "</BICFI></FinInstnId></CdtrAgt>"
-     "<Cdtr><Nm>" creditor-name "</Nm></Cdtr>"
-     "<CdtrAcct><Id><IBAN>" (:iban creditor) "</IBAN></Id></CdtrAcct>"
-     "</CdtTrfTxInf>"
-     "</PmtInf>"
-     "</CstmrCdtTrfInitn>"
-     "</Document>")))
+  "Real pain.001.001.09 XML for a single credit transfer (one GrpHdr + one
+  PmtInf + one CdtTrfTxInf), delegating to kotoba.swift.iso20022/pain001-doc
+  + xml->str (ADR-2607142340) -- genuinely emitted XML via kotoba-lang/xml's
+  Hiccup->XML emitter, escaping/well-formedness handled there, not by this
+  namespace's own (now removed) hand-rolled string splicing. Converts the
+  major-unit `amount` to integer minor units (see major->minor).
+
+  The initiating party (GrpHdr/InitgPty/Nm) defaults to the debtor's own
+  name -- the common case for a single-instruction payment where the
+  account holder initiates their own transfer; a caller needing a distinct
+  initiating party is out of scope for this single-transaction helper."
+  [{:iso20022/keys [msg-id end-to-end-id instruction-id uetr debtor creditor
+                    amount currency creation-date-time payment-info-id
+                    requested-execution-date charge-bearer remittance-information]}]
+  (iso20022/xml->str
+   (iso20022/pain001-doc
+    {:msg-id                   msg-id
+     :creation-date-time       creation-date-time
+     :initiating-party-name    (:name debtor)
+     :payment-info-id          payment-info-id
+     :requested-execution-date requested-execution-date
+     :charge-bearer            charge-bearer
+     :debtor-name              (:name debtor)
+     :debtor-iban              (:iban debtor)
+     :debtor-bic                (:bic debtor)
+     :transactions
+     [{:instruction-id          instruction-id
+       :end-to-end-id           end-to-end-id
+       :uetr                    uetr
+       :amount-minor            (major->minor amount)
+       :currency                currency
+       :creditor-name           (:name creditor)
+       :creditor-iban           (:iban creditor)
+       :creditor-bic            (:bic creditor)
+       :remittance-information  remittance-information}]})))
 
 ;; ---------------------------------------------------------------------------
 ;; kessai bridge

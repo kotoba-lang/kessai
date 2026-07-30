@@ -1,7 +1,10 @@
 {:paths ["src"]
- :deps {io.github.kotoba-lang/card    {:local/root "../card"}
-        io.github.kotoba-lang/banking {:local/root "../banking"}
-        io.github.kotoba-lang/swift   {:local/root "../swift"}}
+ :deps {io.github.kotoba-lang/card    {:git/url "https://github.com/kotoba-lang/card.git"
+                                     :git/sha "62d9ea207a717e213177450d5538d8491fee8295"}
+        io.github.kotoba-lang/banking {:git/url "https://github.com/kotoba-lang/banking.git"
+                                     :git/sha "b8750ad17d16c012c7de62d4bf785973464495cc"}
+        io.github.kotoba-lang/swift   {:git/url "https://github.com/kotoba-lang/swift.git"
+                                     :git/sha "bf63b246496e317dc395e8e4a232d61576ae2b2a"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

@@ -8,14 +8,23 @@
 
   A PaymentRef is rail-agnostic: {:kessai/ref :kessai/rail :kessai/status
   :kessai/amount :kessai/currency :kessai/instrument}, :kessai/rail is
-  :card | :wire, :kessai/status is one of :authorized | :declined | :failed |
-  :captured | :refunded | :partially-refunded | :voided.
+  :card | :wire | :redirect, :kessai/status is one of :authorized | :declined
+  | :failed | :captured | :refunded | :partially-refunded | :voided.
 
   Card-rail requests are built by kotoba.kessai.card (ISO 8583, via
   kotoba.card); wire-rail requests are built by kotoba.kessai.wire (ISO 20022
   pain.001 + BIC, via kotoba.banking). This namespace only knows the
   rail-agnostic port and the ledger tie-in (via kotoba.banking's double-entry
   postings) — it never touches ISO 8583/ISO 20022 shapes directly.
+
+  **IPaymentPort does not cover every rail, and that is deliberate.**
+  kotoba.kessai.redirect (`:redirect`) models PSP-hosted checkout — Stripe
+  Checkout, PayPal, Adyen HPP — where the merchant never holds the
+  instrument, never issues an authorization and cannot capture. It has its
+  own session lifecycle and projects onto a PaymentRef only once settled
+  (`redirect/->payment-ref`), so the ledger tie-in below still works. Do not
+  widen `:card` to swallow it: authorize/capture is a card-present model and
+  a redirect flow does not have those steps to implement.
 
   Amounts are plain numbers in the smallest unit of the transaction currency
   (e.g. cents) — no BigDecimal assumption, keeping the library portable

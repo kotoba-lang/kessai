@@ -29,7 +29,7 @@
 
   Amounts are integers in the smallest unit of the transaction currency, as
   everywhere else in kessai."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba.kessai :as kessai]))
 
 ;; ---------------------------------------------------------------------------

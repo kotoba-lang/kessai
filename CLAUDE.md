@@ -70,6 +70,6 @@ hosted redirect では **merchant は instrument を一度も持たず、authori
 ## 検証
 
 ```bash
-clojure -M:test   # 21 tests / 139 assertions
-clojure -M:lint   # errors 0 / warnings 0
+kbb -M:test   # 21 tests / 139 assertions
+kbb -M:lint   # errors 0 / warnings 0
 ```

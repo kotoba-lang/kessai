@@ -1,5 +1,5 @@
 (ns kotoba.kessai.card-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.card :as card]
             [kotoba.kessai :as kessai]
             [kotoba.kessai.card :as kcard]))

@@ -1,5 +1,5 @@
 (ns kotoba.kessai.redirect-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kessai :as kessai]
             [kotoba.kessai.redirect :as rd]))
 

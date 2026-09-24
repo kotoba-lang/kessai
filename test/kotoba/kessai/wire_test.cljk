@@ -1,5 +1,5 @@
 (ns kotoba.kessai.wire-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.kessai.wire :as wire]
             [kotoba.swift.iso20022 :as iso20022]))
 
